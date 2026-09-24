@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower Defense - Protótipo 2D</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            background-color: #2b2b2b;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            pointer-events: none;
+            font-size: 16px;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .hud-item {
+            background: rgba(0, 0, 0, 0.6);
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            display: none;
+        }
+
+        #game-over-screen h1 {
+            color: #ff4444;
+            font-size: 36px;
+            text-transform: uppercase;
+        }
+
+        #restart-btn {
+            padding: 10px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #restart-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        
+        <div id="ui-overlay">
+            <div class="hud-item" style="color: #ffd700;">Moedas: <span id="coin-count">0</span></div>
+            <div class="hud-item" style="color: #ff4444;">Vida da Base: <span id="base-hp">100 / 100</span></div>
+            <div class="hud-item" style="color: #4da6ff;">Nível do Jogador: <span id="player-level">1</span></div>
+        </div>
+
+        <div id="game-over-screen">
+            <h1>Sua Base Foi Destruída!</h1>
+            <button id="restart-btn" onclick="restartGame()">Jogar Novamente</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const coinCountEl = document.getElementById('coin-count');
+        const baseHpEl = document.getElementById('base-hp');
+        const playerLevelEl = document.getElementById('player-level');
+        const gameOverScreen = document.getElementById('game-over-screen');
+
+        // Estado do Jogo
+        let gameOver = false;
+        let coins = 0;
+        let keys = {};
+
+        // Definição do Caminho dos Inimigos
+        const path = [
+            { x: 0, y: 100 },
+            { x: 650, y: 100 },
+            { x: 650, y: 350 },
+            { x: 150, y: 350 },
+            { x: 150, y: 550 },
+            { x: 750, y: 550 }
+        ];
+
+        // Entidades
+        class Base {
+            constructor() {
+                this.x = 720;
+                this.y = 510;
+                this.width = 60;
+                this.height = 80;
+                this.maxHp = 100;
+                this.hp = this.maxHp;
+                this.level = 1;
+                this.upgradeCost = 100;
+            }
+
+            draw() {
+                ctx.fillStyle = '#ff4444';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(this.x, this.y, this.width, this.height);
+
+                // Barra de Vida
+                ctx.fillStyle = '#333';
+                ctx.fillRect(this.x, this.y - 12, this.width, 8);
+                ctx.fillStyle = '#00ff00';
+                ctx.fillRect(this.x, this.y - 12, (this.hp / this.maxHp) * this.width, 8);
+            }
+
+            upgrade() {
+                this.level++;
+                this.maxHp += 50;
+                this.hp = this.maxHp;
+                this.upgradeCost = Math.floor(this.upgradeCost * 1.5);
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.x = 400;
+                this.y = 250;
+                this.radius = 15;
+                this.speed = 3.5;
+                this.fireRate = 20; // Frames por tiro
+                this.fireTimer = 0;
+                this.damage = 15;
+                this.range = 180;
+                this.level = 1;
+            }
+
+            move() {
+                if ((keys['w'] || keys['W'] || keys['ArrowUp']) && this.y - this.radius > 0) this.y -= this.speed;
+                if ((keys['s'] || keys['S'] || keys['ArrowDown']) && this.y + this.radius < canvas.height) this.y += this.speed;
+                if ((keys['a'] || keys['A'] || keys['ArrowLeft']) && this.x - this.radius > 0) this.x -= this.speed;
+                if ((keys['d'] || keys['D'] || keys['ArrowRight']) && this.x + this.radius < canvas.width) this.x += this.speed;
+            }
+
+            update() {
+                this.move();
+                this.fireTimer++;
+
+                if (this.fireTimer >= this.fireRate) {
+                    let target = getClosestEnemy(this.x, this.y, this.range);
+                    if (target) {
+                        projectiles.push(new Projectile(this.x, this.y, target, this.damage, '#4da6ff', 7));
+                        this.fireTimer = 0;
+                    }
+                }
+            }
+
+            draw() {
+                // Alcance do jogador
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(77, 166, 255, 0.15)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Corpo do jogador
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#4da6ff';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        class Enemy {
+            constructor(type = 'basic') {
+                this.pathIndex = 0;
+                this.x = path[0].x;
+                this.y = path[0].y;
+                
+                if (type === 'boss') {
+                    this.radius = 22;
+                    this.hp = 300;
+                    this.maxHp = 300;
+                    this.speed = 0.8;
+                    this.reward = 50;
+                    this.color = '#800080';
+                    this.damage = 30;
+                } else {
+                    this.radius = 12;
+                    this.hp = 40;
+                    this.maxHp = 40;
+                    this.speed = 1.8;
+                    this.reward = 10;
+                    this.color = '#ffaa00';
+                    this.damage = 10;
+                }
+            }
+
+            update() {
+                let target = path[this.pathIndex + 1];
+                if (!target) return;
+
+                let dx = target.x - this.x;
+                let dy = target.y - this.y;
+                let dist = Math.hypot(dx, dy);
+
+                if (dist < this.speed) {
+                    this.x = target.x;
+                    this.y = target.y;
+                    this.pathIndex++;
+                    if (this.pathIndex >= path.length - 1) {
+                        // Ataca a base
+                        base.hp -= this.damage;
+                        if (base.hp <= 0) {
+                            base.hp = 0;
+                            gameOver = true;
+                        }
+                        this.hp = 0; // Remove inimigo
+                    }
+                } else {
+                    this.x += (dx / dist) * this.speed;
+                    this.y += (dy / dist) * this.speed;
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+
+                // Barra de Vida
+                ctx.fillStyle = '#333';
+                ctx.fillRect(this.x - 15, this.y - this.radius - 8, 30, 4);
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(this.x - 15, this.y - this.radius - 8, (this.hp / this.maxHp) * 30, 4);
+            }
+        }
+
+        class Projectile {
+            constructor(x, y, target, damage, color = '#ffff00', speed = 8) {
+                this.x = x;
+                this.y = y;
+                this.target = target;
+                this.damage = damage;
+                this.color = color;
+                this.speed = speed;
+                this.radius = 4;
+                this.active = true;
+            }
+
+            update() {
+                if (!this.target || this.target.hp <= 0) {
+                    this.active = false;
+                    return;
+                }
+
+                let dx = this.target.x - this.x;
+                let dy = this.target.y - this.y;
+                let dist = Math.hypot(dx, dy);
+
+                if (dist < this.speed) {
+                    this.target.hp -= this.damage;
+                    if (this.target.hp <= 0) {
+                        coins += this.target.reward;
+                    }
+                    this.active = false;
+                } else {
+                    this.x += (dx / dist) * this.speed;
+                    this.y += (dy / dist) * this.speed;
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+            }
+        }
+
+        class TowerSlot {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 25;
+                this.level = 0; // 0 = Vazio, 1 a 5 = Níveis de torre
+                this.fireTimer = 0;
+            }
+
+            getCost() {
+                if (this.level === 0) return 30;
+                return Math.floor(40 * Math.pow(1.6, this.level));
+            }
+
+            getStats() {
+                return {
+                    damage: 10 + this.level * 12,
+                    range: 100 + this.level * 15,
+                    fireRate: Math.max(8, 35 - this.level * 5)
+                };
+            }
+
+            update() {
+                if (this.level === 0) return;
+
+                let stats = this.getStats();
+                this.fireTimer++;
+
+                if (this.fireTimer >= stats.fireRate) {
+                    let target = getClosestEnemy(this.x, this.y, stats.range);
+                    if (target) {
+                        projectiles.push(new Projectile(this.x, this.y, target, stats.damage, '#00ffff', 9));
+                        this.fireTimer = 0;
+                    }
+                }
+            }
+
+            draw() {
+                // Área da Plataforma
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.level === 0 ? 'rgba(255, 255, 255, 0.1)' : '#444';
+                ctx.fill();
+                ctx.strokeStyle = this.level === 0 ? '#aaa' : '#00ffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                if (this.level > 0) {
+                    // Desenha Torre
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 12 + this.level * 2, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsl(${this.level * 50}, 80%, 50%)`;
+                    ctx.fill();
+
+                    // Rótulo de Nível
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`v${this.level}`, this.x, this.y + 4);
+                } else {
+                    // Custo de Compra
+                    ctx.fillStyle = '#ffd700';
+                    ctx.font = '11px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`${this.getCost()}G`, this.x, this.y + 4);
+                }
+            }
+
+            checkUpgrade(player) {
+                let dist = Math.hypot(player.x - this.x, player.y - this.y);
+                if (dist < player.radius + this.radius) {
+                    let cost = this.getCost();
+                    if (this.level < 5 && coins >= cost) {
+                        coins -= cost;
+                        this.level++;
+                    }
+                }
+            }
+        }
+
+        // Instâncias
+        let base = new Base();
+        let player = new Player();
+        let enemies = [];
+        let projectiles = [];
+        let towerSlots = [
+            new TowerSlot(300, 180),
+            new TowerSlot(500, 180),
+            new TowerSlot(350, 290),
+            new TowerSlot(500, 430),
+            new TowerSlot(300, 480)
+        ];
+
+        // Sistema de Ondas
+        let spawnTimer = 0;
+        let wave = 1;
+
+        function getClosestEnemy(x, y, range) {
+            let closest = null;
+            let minDist = range;
+
+            for (let enemy of enemies) {
+                let dist = Math.hypot(enemy.x - x, enemy.y - y);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = enemy;
+                }
+            }
+            return closest;
+        }
+
+        // Eventos do Teclado
+        window.addEventListener('keydown', e => keys[e.key] = true);
+        window.addEventListener('keyup', e => keys[e.key] = false);
+
+        function drawPath() {
+            ctx.beginPath();
+            ctx.moveTo(path[0].x, path[0].y);
+            for (let i = 1; i < path.length; i++) {
+                ctx.lineTo(path[i].x, path[i].y);
+            }
+            ctx.strokeStyle = '#3a3a3a';
+            ctx.lineWidth = 40;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+        }
+
+        function update() {
+            if (gameOver) {
+                gameOverScreen.style.display = 'flex';
+                return;
+            }
+
+            // Geração de Inimigos
+            spawnTimer++;
+            if (spawnTimer % Math.max(30, 120 - wave * 5) === 0) {
+                let isBoss = (spawnTimer % 600 === 0);
+                enemies.push(new Enemy(isBoss ? 'boss' : 'basic'));
+            }
+
+            if (spawnTimer % 1000 === 0) wave++;
+
+            player.update();
+
+            // Atualiza Slots de Torre e verifica upgrade ao encostar
+            towerSlots.forEach(slot => {
+                slot.update();
+                slot.checkUpgrade(player);
+            });
+
+            // Atualiza Projetéis
+            projectiles.forEach(p => p.update());
+            projectiles = projectiles.filter(p => p.active);
+
+            // Atualiza Inimigos
+            enemies.forEach(e => e.update());
+            enemies = enemies.filter(e => e.hp > 0);
+
+            // Atualiza HUD
+            coinCountEl.innerText = coins;
+            baseHpEl.innerText = `${base.hp} / ${base.maxHp}`;
+            playerLevelEl.innerText = player.level;
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawPath();
+            base.draw();
+            towerSlots.forEach(slot => slot.draw());
+            player.draw();
+            enemies.forEach(e => e.draw());
+            projectiles.forEach(p => p.draw());
+        }
+
+        function gameLoop() {
+            update();
+            render();
+            if (!gameOver) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function restartGame() {
+            gameOver = false;
+            coins = 0;
+            spawnTimer = 0;
+            wave = 1;
+            enemies = [];
+            projectiles = [];
+            base = new Base();
+            player = new Player();
+            towerSlots.forEach(slot => slot.level = 0);
+            gameOverScreen.style.display = 'none';
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Inicia o Jogo
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

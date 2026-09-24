@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tower Defense - Protótipo V3</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --panel:rgba(9,12,18,.88);
+  --panel-2:rgba(22,28,38,.94);
+  --line:#374151;
+  --text:#f5f7fa;
+  --muted:#aeb7c4;
+  --gold:#ffd54a;
+  --blue:#4da6ff;
+  --green:#29d391;
+  --red:#ff5757;
+}
+body{
+  min-height:100vh;background:#11151b;color:var(--text);font-family:Arial,sans-serif;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+}
+#game-shell{display:flex;gap:14px;align-items:stretch}
+#game-container{
+  position:relative;width:min(78vw,960px);aspect-ratio:4/3;
+  border:1px solid #2b3240;border-radius:12px;overflow:hidden;
+  box-shadow:0 18px 60px rgba(0,0,0,.55);background:#20252d;
+}
+canvas{display:block;width:100%;height:100%}
+#hud{
+  position:absolute;left:12px;top:12px;display:flex;flex-wrap:wrap;gap:7px;max-width:72%;
+  z-index:5;pointer-events:none;
+}
+.hud{
+  padding:7px 10px;border-radius:7px;background:rgba(0,0,0,.68);
+  border:1px solid #434c5c;font-size:13px;font-weight:bold;
+  backdrop-filter:blur(3px)
+}
+.hud.gold{color:var(--gold)} .hud.red{color:#ff7070} .hud.blue{color:#6bb5ff}
+.hud.green{color:#62ebaf}
+#top-actions{
+  position:absolute;right:12px;top:12px;display:flex;gap:7px;z-index:6;
+}
+button{
+  border:1px solid #586273;background:var(--panel);color:white;border-radius:7px;
+  padding:8px 11px;font-weight:bold;cursor:pointer;transition:.14s;
+}
+button:hover{transform:translateY(-1px);filter:brightness(1.12)}
+button.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+button.danger{border-color:#8b3e3e}
+#side-panel{
+  width:270px;background:var(--panel-2);border:1px solid #2d3542;border-radius:12px;
+  padding:14px;box-shadow:0 18px 60px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:12px;
+}
+.panel-title{font-size:18px;font-weight:800}
+.panel-sub{color:var(--muted);font-size:12px;line-height:1.4}
+.card{
+  border:1px solid var(--line);border-radius:9px;padding:11px;background:rgba(255,255,255,.025);
+}
+.card h3{font-size:13px;margin-bottom:6px}
+.stat-row{display:flex;justify-content:space-between;font-size:12px;color:#dce2ea;margin-top:5px}
+.buy-btn{width:100%;margin-top:9px}
+#build-info{min-height:69px}
+#toast{
+  position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+  background:rgba(0,0,0,.82);border:1px solid #576273;border-radius:8px;
+  padding:9px 14px;font-size:13px;z-index:15;opacity:0;pointer-events:none;
+  transition:opacity .18s, transform .18s;
+}
+#toast.show{opacity:1;transform:translate(-50%,-2px)}
+#game-over{
+  position:absolute;inset:0;background:rgba(0,0,0,.84);display:none;align-items:center;
+  justify-content:center;flex-direction:column;gap:11px;z-index:30;text-align:center;
+}
+#game-over h1{font-size:38px;color:#ff6262}
+#pause-label{
+  position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:20;
+  font-size:52px;font-weight:900;letter-spacing:3px;text-shadow:0 5px 20px #000;
+  background:rgba(0,0,0,.18);pointer-events:none;
+}
+@media (max-width:1050px){
+  body{overflow:auto;padding:14px}
+  #game-shell{flex-direction:column}
+  #game-container{width:min(96vw,960px)}
+  #side-panel{width:min(96vw,960px)}
+}
+</style>
+</head>
+<body>
+<div id="game-shell">
+  <div id="game-container">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="hud">
+      <div class="hud gold">Moedas: <span id="coins">60</span></div>
+      <div class="hud red">Base: <span id="baseHp">100 / 100</span></div>
+      <div class="hud blue">Player: V<span id="playerLevel">1</span></div>
+      <div class="hud green">Onda: <span id="wave">1</span></div>
+      <div class="hud">Inimigos: <span id="enemyCount">0</span></div>
+    </div>
+
+    <div id="top-actions">
+      <button id="speedBtn">2X</button>
+      <button id="pauseBtn">Pausar</button>
+      <button id="restartBtn" class="danger">Reiniciar</button>
+    </div>
+
+    <div id="pause-label">PAUSADO</div>
+    <div id="toast"></div>
+
+    <div id="game-over">
+      <h1>BASE DESTRUÍDA</h1>
+      <div>Você chegou à onda <strong id="finalWave">1</strong>.</div>
+      <button id="gameOverRestart">Jogar novamente</button>
+    </div>
+  </div>
+
+  <aside id="side-panel">
+    <div>
+      <div class="panel-title">Central de Defesa V3</div>
+      <div class="panel-sub">Encoste nas plataformas para construir/evoluir. A V2 custa o dobro da construção inicial.</div>
+    </div>
+
+    <div class="card" id="build-info">
+      <h3>Construção selecionada</h3>
+      <div class="panel-sub" id="selectionText">Aproxime o player de uma plataforma.</div>
+    </div>
+
+    <div class="card">
+      <h3>Player</h3>
+      <div class="stat-row"><span>Nível</span><strong id="pStatLevel">V1</strong></div>
+      <div class="stat-row"><span>Dano</span><strong id="pStatDamage">15</strong></div>
+      <div class="stat-row"><span>Alcance</span><strong id="pStatRange">180</strong></div>
+      <button class="buy-btn" id="playerV2Btn">Comprar Player V2 — 60G</button>
+    </div>
+
+    <div class="card">
+      <h3>Torretas</h3>
+      <div class="stat-row"><span>Construção V1</span><strong>30G</strong></div>
+      <div class="stat-row"><span>Upgrade V2</span><strong>60G</strong></div>
+      <div class="stat-row"><span>Nível máximo</span><strong>V5</strong></div>
+    </div>
+
+    <div class="card">
+      <h3>Acelerador</h3>
+      <div class="panel-sub">Use 2X para acelerar o tempo de combate. Movimento, disparos, inimigos, projéteis e spawn acompanham a velocidade.</div>
+    </div>
+
+    <div class="panel-sub">Controles: WASD / setas • Espaço = 1X/2X • P = Player V2 • Esc = pausa</div>
+  </aside>
+</div>
+
+<script>
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+
+const ui={
+  coins:document.getElementById('coins'),
+  baseHp:document.getElementById('baseHp'),
+  playerLevel:document.getElementById('playerLevel'),
+  wave:document.getElementById('wave'),
+  enemyCount:document.getElementById('enemyCount'),
+  pStatLevel:document.getElementById('pStatLevel'),
+  pStatDamage:document.getElementById('pStatDamage'),
+  pStatRange:document.getElementById('pStatRange'),
+  playerV2Btn:document.getElementById('playerV2Btn'),
+  selectionText:document.getElementById('selectionText'),
+  speedBtn:document.getElementById('speedBtn'),
+  pauseBtn:document.getElementById('pauseBtn'),
+  restartBtn:document.getElementById('restartBtn'),
+  gameOverRestart:document.getElementById('gameOverRestart'),
+  gameOver:document.getElementById('game-over'),
+  finalWave:document.getElementById('finalWave'),
+  pauseLabel:document.getElementById('pause-label'),
+  toast:document.getElementById('toast')
+};
+
+const CONFIG={
+  START_COINS:60,
+  BUILD_V1:30,
+  BUILD_V2:60,
+  PLAYER_V2:60,
+  MAX_TOWER:5,
+  SPEEDS:[1,2]
+};
+
+let coins=CONFIG.START_COINS;
+let wave=1;
+let paused=false;
+let gameOver=false;
+let speedIndex=0;
+let spawnTimer=0;
+let waveTimer=0;
+let lastTime=performance.now();
+let keys={};
+let toastTimer=0;
+let selectedSlot=null;
+
+const path=[
+  {x:0,y:100},{x:650,y:100},{x:650,y:350},
+  {x:150,y:350},{x:150,y:550},{x:750,y:550}
+];
+
+class Base{
+  constructor(){
+    this.x=720;this.y=510;this.width=60;this.height=80;
+    this.maxHp=100;this.hp=100;this.level=1;
+  }
+  draw(){
+    ctx.save();
+    ctx.fillStyle='#7e2424';ctx.fillRect(this.x,this.y,this.width,this.height);
+    ctx.fillStyle='#ba3030';ctx.fillRect(this.x+6,this.y+8,this.width-12,this.height-8);
+    ctx.fillStyle='#5c1717';ctx.fillRect(this.x+8,this.y-8,this.width-16,8);
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(this.x,this.y,this.width,this.height);
+    ctx.fillStyle='#222';ctx.fillRect(this.x,this.y-18,this.width,8);
+    ctx.fillStyle='#35df6e';ctx.fillRect(this.x,this.y-18,(this.hp/this.maxHp)*this.width,8);
+    ctx.restore();
+  }
+}
+
+class Player{
+  constructor(){
+    this.x=400;this.y=250;this.radius=15;
+    this.speed=210;this.cooldown=0;this.fireRate=.333;
+    this.damage=15;this.range=180;this.level=1;
+  }
+  move(dt){
+    const d=this.speed*dt;
+    if((keys.w||keys.W||keys.ArrowUp)&&this.y-this.radius>0)this.y-=d;
+    if((keys.s||keys.S||keys.ArrowDown)&&this.y+this.radius<canvas.height)this.y+=d;
+    if((keys.a||keys.A||keys.ArrowLeft)&&this.x-this.radius>0)this.x-=d;
+    if((keys.d||keys.D||keys.ArrowRight)&&this.x+this.radius<canvas.width)this.x+=d;
+  }
+  buyV2(){
+    if(this.level>=2){showToast('Player V2 já está ativo.');return false;}
+    if(coins<CONFIG.PLAYER_V2){showToast('Moedas insuficientes para Player V2.');return false;}
+    coins-=CONFIG.PLAYER_V2;this.level=2;
+    this.damage=24;this.range=210;this.speed=235;this.fireRate=.233;
+    showToast('Player V2 ativado!');
+    return true;
+  }
+  update(dt){
+    this.move(dt);
+    this.cooldown-=dt;
+    if(this.cooldown<=0){
+      const target=getClosestEnemy(this.x,this.y,this.range);
+      if(target){
+        projectiles.push(new Projectile(this.x,this.y,target,this.damage,'#55b7ff',430));
+        this.cooldown=this.fireRate;
+      }else this.cooldown=0;
+    }
+  }
+  draw(){
+    ctx.save();
+    ctx.beginPath();ctx.arc(this.x,this.y,this.range,0,Math.PI*2);
+    ctx.strokeStyle=this.level>=2?'rgba(41,211,145,.2)':'rgba(77,166,255,.16)';ctx.lineWidth=1;ctx.stroke();
+
+    if(this.level===1){
+      ctx.beginPath();ctx.arc(this.x,this.y,15,0,Math.PI*2);
+      ctx.fillStyle='#4da6ff';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle='#fff';
+      ctx.beginPath();ctx.arc(this.x-5,this.y-3,2,0,Math.PI*2);ctx.arc(this.x+5,this.y-3,2,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.translate(this.x,this.y);
+      ctx.fillStyle='#23cc98';
+      ctx.beginPath();ctx.moveTo(-21,0);ctx.lineTo(-8,-10);ctx.lineTo(-8,10);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(21,0);ctx.lineTo(8,-10);ctx.lineTo(8,10);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(17,0);ctx.lineTo(0,18);ctx.lineTo(-17,0);ctx.closePath();
+      ctx.fillStyle='#1de0aa';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+      ctx.beginPath();ctx.arc(0,0,5,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+class Enemy{
+  constructor(type='basic'){
+    this.type=type;this.pathIndex=0;this.x=path[0].x;this.y=path[0].y;
+    if(type==='tank'){
+      this.radius=17;this.hp=110;this.maxHp=110;this.speed=58;this.reward=20;this.damage=18;this.color='#d45b34';
+    }else if(type==='swift'){
+      this.radius=9;this.hp=26;this.maxHp=26;this.speed=155;this.reward=12;this.damage=8;this.color='#d85cff';
+    }else if(type==='boss'){
+      this.radius=24;this.hp=420;this.maxHp=420;this.speed=42;this.reward=70;this.damage=35;this.color='#8f48c9';
+    }else{
+      this.radius=12;this.hp=40;this.maxHp=40;this.speed=108;this.reward=10;this.damage=10;this.color='#ffaa00';
+    }
+  }
+  update(dt){
+    const t=path[this.pathIndex+1];if(!t)return;
+    const dx=t.x-this.x,dy=t.y-this.y,dist=Math.hypot(dx,dy),step=this.speed*dt;
+    if(dist<=step){
+      this.x=t.x;this.y=t.y;this.pathIndex++;
+      if(this.pathIndex>=path.length-1){
+        base.hp-=this.damage;if(base.hp<=0){base.hp=0;gameOver=true;}
+        this.hp=0;
+      }
+    }else{this.x+=(dx/dist)*step;this.y+=(dy/dist)*step;}
+  }
+  draw(){
+    ctx.save();
+    ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+    ctx.fillStyle=this.color;ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+    if(this.type==='boss'){
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius+5,0,Math.PI*2);
+      ctx.strokeStyle='rgba(220,130,255,.45)';ctx.stroke();
+    }
+    ctx.fillStyle='#333';ctx.fillRect(this.x-17,this.y-this.radius-10,34,4);
+    ctx.fillStyle='#ff4141';ctx.fillRect(this.x-17,this.y-this.radius-10,34*(this.hp/this.maxHp),4);
+    ctx.restore();
+  }
+}
+
+class Projectile{
+  constructor(x,y,target,damage,color,speed){
+    this.x=x;this.y=y;this.target=target;this.damage=damage;this.color=color;this.speed=speed;this.radius=4;this.active=true;
+  }
+  update(dt){
+    if(!this.target||this.target.hp<=0){this.active=false;return;}
+    const dx=this.target.x-this.x,dy=this.target.y-this.y,dist=Math.hypot(dx,dy),step=this.speed*dt;
+    if(dist<=step){
+      this.target.hp-=this.damage;
+      if(this.target.hp<=0)coins+=this.target.reward;
+      this.active=false;
+    }else{this.x+=(dx/dist)*step;this.y+=(dy/dist)*step;}
+  }
+  draw(){
+    ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fillStyle=this.color;ctx.fill();
+  }
+}
+
+class TowerSlot{
+  constructor(x,y){this.x=x;this.y=y;this.radius=25;this.level=0;this.cooldown=0;}
+  getCost(){
+    if(this.level===0)return CONFIG.BUILD_V1;
+    if(this.level===1)return CONFIG.BUILD_V2;
+    return Math.floor(CONFIG.BUILD_V2*Math.pow(1.55,this.level-1));
+  }
+  getStats(){
+    if(this.level===1)return{damage:22,range:115,fireRate:.467,speed:500,color:'#00ffff'};
+    return{
+      damage:10+this.level*12,range:100+this.level*15,
+      fireRate:Math.max(.133,(35-this.level*5)/60),speed:540,
+      color:this.level>=3?'#56ffbd':'#00ffff'
+    };
+  }
+  update(dt){
+    if(!this.level)return;
+    const s=this.getStats();this.cooldown-=dt;
+    if(this.cooldown<=0){
+      const t=getClosestEnemy(this.x,this.y,s.range);
+      if(t){projectiles.push(new Projectile(this.x,this.y,t,s.damage,s.color,s.speed));this.cooldown=s.fireRate;}
+      else this.cooldown=0;
+    }
+  }
+  getSelectionText(){
+    if(this.level===0)return 'Plataforma vazia — construa uma torre por 30G.';
+    if(this.level===1)return 'Torre V1 — próxima evolução para V2 por 60G.';
+    return `Torre V${this.level} — próximo upgrade por ${this.getCost()}G.`;
+  }
+  tryUpgrade(player){
+    const d=Math.hypot(player.x-this.x,player.y-this.y);
+    if(d>=player.radius+this.radius)return false;
+    selectedSlot=this;
+    const cost=this.getCost();
+    if(this.level>=CONFIG.MAX_TOWER){showToast('Esta torre já está no nível máximo.');return false;}
+    if(coins<cost){showToast(`Faltam ${cost-coins} moedas para V${this.level+1}.`);return false;}
+    coins-=cost;this.level++;
+    showToast(`Torre evoluída para V${this.level}!`);
+    player.x += player.x < this.x ? -5 : 5;
+    return true;
+  }
+  draw(){
+    ctx.save();
+    const selected=selectedSlot===this;
+    ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+    ctx.fillStyle=this.level===0?'rgba(255,255,255,.08)':'#3e4653';ctx.fill();
+    ctx.strokeStyle=selected?'#ffd54a':(this.level===0?'#8a93a1':'#00d8ff');
+    ctx.lineWidth=selected?3:2;ctx.stroke();
+
+    if(this.level===0){
+      ctx.fillStyle='#ffd54a';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('30G',this.x,this.y+4);
+    }else if(this.level===1){
+      ctx.beginPath();ctx.arc(this.x,this.y,13,0,Math.PI*2);ctx.fillStyle='#ffd54a';ctx.fill();ctx.strokeStyle='#fff';ctx.stroke();
+      ctx.fillStyle='#222';ctx.fillRect(this.x+8,this.y-3,17,6);
+      ctx.fillStyle='#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText('V1',this.x,this.y+4);
+    }else{
+      ctx.fillStyle=this.level>=4?'#45e5aa':'#17af80';ctx.fillRect(this.x-14,this.y-14,28,28);
+      ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(this.x-14,this.y-14,28,28);
+      ctx.fillStyle='#d9fff3';ctx.beginPath();ctx.arc(this.x,this.y,8,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#17352f';ctx.fillRect(this.x+8,this.y-3,17,6);
+      ctx.fillStyle='#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText('V'+this.level,this.x,this.y+4);
+    }
+    ctx.restore();
+  }
+}
+
+let base=new Base(),player=new Player(),enemies=[],projectiles=[];
+let towerSlots=[
+  new TowerSlot(300,180),new TowerSlot(500,180),new TowerSlot(350,290),
+  new TowerSlot(500,430),new TowerSlot(300,480)
+];
+
+function getClosestEnemy(x,y,range){
+  let best=null,distBest=range;
+  for(const e of enemies){
+    if(e.hp<=0)continue;
+    const d=Math.hypot(e.x-x,e.y-y);
+    if(d<distBest){distBest=d;best=e;}
+  }
+  return best;
+}
+
+function spawnEnemy(){
+  const roll=Math.random();
+  let type='basic';
+  if(wave%5===0&&enemies.length===0)type='boss';
+  else if(wave>=4&&roll<.16)type='tank';
+  else if(wave>=3&&roll<.34)type='swift';
+  enemies.push(new Enemy(type));
+}
+
+function drawWorld(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Fundo em grade
+  ctx.fillStyle='#252b33';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle='rgba(255,255,255,.035)';ctx.lineWidth=1;
+  for(let x=0;x<canvas.width;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();}
+  for(let y=0;y<canvas.height;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();}
+
+  // Caminho
+  ctx.beginPath();ctx.moveTo(path[0].x,path[0].y);
+  for(let i=1;i<path.length;i++)ctx.lineTo(path[i].x,path[i].y);
+  ctx.strokeStyle='#3b414a';ctx.lineWidth=44;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+  ctx.strokeStyle='#555d68';ctx.lineWidth=2;ctx.setLineDash([8,8]);ctx.stroke();ctx.setLineDash([]);
+
+  // Etiqueta de saída/base
+  ctx.fillStyle='rgba(0,0,0,.42)';ctx.fillRect(690,470,105,25);
+  ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('BASE',742,487);
+
+  base.draw();
+  for(const s of towerSlots)s.draw();
+  player.draw();
+  for(const e of enemies)e.draw();
+  for(const p of projectiles)p.draw();
+}
+
+function update(dt){
+  if(paused||gameOver)return;
+
+  spawnTimer+=dt;waveTimer+=dt;
+
+  const interval=Math.max(.52,1.9-wave*.055);
+  if(spawnTimer>=interval){spawnTimer=0;spawnEnemy();}
+  if(waveTimer>=18){waveTimer=0;wave++;showToast('Onda '+wave+' iniciada!');}
+
+  player.update(dt);
+  for(const s of towerSlots)s.update(dt);
+  for(const s of towerSlots)s.tryUpgrade(player);
+
+  for(const p of projectiles)p.update(dt);
+  projectiles=projectiles.filter(p=>p.active);
+
+  for(const e of enemies)e.update(dt);
+  enemies=enemies.filter(e=>e.hp>0);
+
+  if(gameOver){
+    ui.finalWave.textContent=wave;ui.gameOver.style.display='flex';
+  }
+
+  refreshUI();
+}
+
+function refreshUI(){
+  ui.coins.textContent=coins;
+  ui.baseHp.textContent=`${base.hp} / ${base.maxHp}`;
+  ui.playerLevel.textContent=player.level;
+  ui.wave.textContent=wave;
+  ui.enemyCount.textContent=enemies.length;
+  ui.pStatLevel.textContent='V'+player.level;
+  ui.pStatDamage.textContent=player.damage;
+  ui.pStatRange.textContent=player.range;
+  ui.playerV2Btn.textContent=player.level>=2?'Player V2 — ATIVO':`Comprar Player V2 — ${CONFIG.PLAYER_V2}G`;
+  ui.playerV2Btn.disabled=player.level>=2;
+  ui.selectionText.textContent=selectedSlot?selectedSlot.getSelectionText():'Aproxime o player de uma plataforma.';
+  ui.speedBtn.textContent=getGameSpeed()===2?'Velocidade: 2X':'Velocidade: 1X';
+  ui.speedBtn.classList.toggle('active',getGameSpeed()===2);
+  ui.pauseBtn.textContent=paused?'Retomar':'Pausar';
+  ui.pauseLabel.style.display=paused&&!gameOver?'flex':'none';
+}
+
+function getGameSpeed(){return CONFIG.SPEEDS[speedIndex]}
+
+function toggleSpeed(){
+  if(gameOver)return;
+  speedIndex=speedIndex===0?1:0;
+  showToast('Velocidade: '+getGameSpeed()+'X');
+  refreshUI();
+}
+
+function togglePause(){
+  if(gameOver)return;
+  paused=!paused;refreshUI();
+}
+
+function restartGame(){
+  coins=CONFIG.START_COINS;wave=1;paused=false;gameOver=false;speedIndex=0;
+  spawnTimer=0;waveTimer=0;selectedSlot=null;
+  base=new Base();player=new Player();enemies=[];projectiles=[];
+  towerSlots=[
+    new TowerSlot(300,180),new TowerSlot(500,180),new TowerSlot(350,290),
+    new TowerSlot(500,430),new TowerSlot(300,480)
+  ];
+  ui.gameOver.style.display='none';
+  lastTime=performance.now();refreshUI();showToast('Partida reiniciada.');
+}
+
+function showToast(message){
+  ui.toast.textContent=message;ui.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>ui.toast.classList.remove('show'),1300);
+}
+
+window.addEventListener('keydown',e=>{
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();
+  keys[e.key]=true;
+  if(e.code==='Space')toggleSpeed();
+  if(e.key==='p'||e.key==='P')player.buyV2();
+  if(e.key==='Escape')togglePause();
+});
+
+window.addEventListener('keyup',e=>{keys[e.key]=false});
+
+ui.speedBtn.addEventListener('click',toggleSpeed);
+ui.pauseBtn.addEventListener('click',togglePause);
+ui.restartBtn.addEventListener('click',restartGame);
+ui.gameOverRestart.addEventListener('click',restartGame);
+ui.playerV2Btn.addEventListener('click',()=>player.buyV2());
+
+canvas.addEventListener('click',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const x=(e.clientX-rect.left)*(canvas.width/rect.width);
+  const y=(e.clientY-rect.top)*(canvas.height/rect.height);
+  let nearest=null,min=Infinity;
+  for(const s of towerSlots){
+    const d=Math.hypot(s.x-x,s.y-y);
+    if(d<min){min=d;nearest=s;}
+  }
+  if(nearest&&min<42){selectedSlot=nearest;showToast(nearest.getSelectionText());refreshUI();}
+});
+
+function loop(now){
+  const realDt=Math.min((now-lastTime)/1000,.05);
+  lastTime=now;
+  update(realDt*getGameSpeed());
+  drawWorld();
+  requestAnimationFrame(loop);
+}
+
+refreshUI();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

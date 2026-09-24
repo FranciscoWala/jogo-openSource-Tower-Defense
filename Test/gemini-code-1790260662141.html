@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bateria de Testes Automatizados - Tower Defense</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #4da6ff;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .summary-box {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .card {
+            background: #1e1e1e;
+            padding: 15px 25px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            flex: 1;
+            text-align: center;
+        }
+
+        .card-title {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .card-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .passed-val { color: #4CAF50; }
+        .failed-val { color: #f44336; }
+
+        .test-group {
+            margin-bottom: 15px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .test-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #1e1e1e;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .test-item:last-child {
+            border-bottom: none;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .badge-pass {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4CAF50;
+            border: 1px solid #4CAF50;
+        }
+
+        .badge-fail {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+            border: 1px solid #f44336;
+        }
+
+        .error-log {
+            font-family: monospace;
+            font-size: 12px;
+            color: #ff8888;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Painel de Testes Automatizados</h1>
+
+    <div class="summary-box">
+        <div class="card">
+            <div class="card-title">TOTAL DE TESTES</div>
+            <div class="card-value" id="total-tests">0</div>
+        </div>
+        <div class="card">
+            <div class="card-title">APROVADOS</div>
+            <div class="card-value passed-val" id="passed-tests">0</div>
+        </div>
+        <div class="card">
+            <div class="card-title">FALHAS</div>
+            <div class="card-value failed-val" id="failed-tests">0</div>
+        </div>
+    </div>
+
+    <div id="test-results"></div>
+
+    <canvas id="mockCanvas" width="800" height="600" style="display: none;"></canvas>
+
+    <script>
+        // --- MOCK E ESTRUTURAS DO JOGO PARA TESTE HEADLESS ---
+        const path = [
+            { x: 0, y: 100 },
+            { x: 650, y: 100 },
+            { x: 650, y: 350 },
+            { x: 150, y: 350 },
+            { x: 150, y: 550 },
+            { x: 750, y: 550 }
+        ];
+
+        class Base {
+            constructor() {
+                this.x = 720;
+                this.y = 510;
+                this.width = 60;
+                this.height = 80;
+                this.maxHp = 100;
+                this.hp = this.maxHp;
+                this.level = 1;
+                this.upgradeCost = 100;
+            }
+            upgrade() {
+                this.level++;
+                this.maxHp += 50;
+                this.hp = this.maxHp;
+                this.upgradeCost = Math.floor(this.upgradeCost * 1.5);
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.x = 400;
+                this.y = 250;
+                this.radius = 15;
+                this.speed = 3.5;
+                this.damage = 15;
+                this.range = 180;
+            }
+            move(dir) {
+                if (dir === 'up') this.y -= this.speed;
+                if (dir === 'down') this.y += this.speed;
+                if (dir === 'left') this.x -= this.speed;
+                if (dir === 'right') this.x += this.speed;
+            }
+        }
+
+        class Enemy {
+            constructor(type = 'basic') {
+                this.pathIndex = 0;
+                this.x = path[0].x;
+                this.y = path[0].y;
+                if (type === 'boss') {
+                    this.hp = 300;
+                    this.speed = 0.8;
+                    this.reward = 50;
+                    this.damage = 30;
+                } else {
+                    this.hp = 40;
+                    this.speed = 1.8;
+                    this.reward = 10;
+                    this.damage = 10;
+                }
+            }
+            takeDamage(amount) {
+                this.hp -= amount;
+                return this.hp <= 0;
+            }
+        }
+
+        class TowerSlot {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 25;
+                this.level = 0;
+            }
+            getCost() {
+                if (this.level === 0) return 30;
+                return Math.floor(40 * Math.pow(1.6, this.level));
+            }
+            getStats() {
+                return {
+                    damage: 10 + this.level * 12,
+                    range: 100 + this.level * 15,
+                    fireRate: Math.max(8, 35 - this.level * 5)
+                };
+            }
+            upgrade(currentCoins) {
+                let cost = this.getCost();
+                if (this.level < 5 && currentCoins >= cost) {
+                    this.level++;
+                    return cost;
+                }
+                return 0;
+            }
+        }
+
+        // --- MINI FRAMEWORK DE TESTES ---
+        let total = 0;
+        let passed = 0;
+        let failed = 0;
+
+        function assert(condition, message) {
+            total++;
+            const resultsContainer = document.getElementById('test-results');
+            const item = document.createElement('div');
+            item.className = 'test-item';
+
+            if (condition) {
+                passed++;
+                item.innerHTML = `<span>${message}</span><span class="badge badge-pass">APROVADO</span>`;
+            } else {
+                failed++;
+                item.innerHTML = `
+                    <div>
+                        <span>${message}</span>
+                        <div class="error-log">Falha na verificação da asserção</div>
+                    </div>
+                    <span class="badge badge-fail">FALHOU</span>`;
+            }
+            resultsContainer.appendChild(item);
+        }
+
+        // --- BATERIA DE TESTES AUTOMATIZADOS ---
+        function runTestSuite() {
+            // Teste 1: Estado Inicial da Base
+            const base = new Base();
+            assert(base.hp === 100 && base.maxHp === 100, "1. Base deve inicializar com 100/100 HP");
+
+            // Teste 2: Upgrade da Base
+            base.upgrade();
+            assert(base.level === 2 && base.maxHp === 150 && base.hp === 150, "2. Upgrade da Base deve aumentar nível para 2 e maxHP para 150");
+
+            // Teste 3: Movimentação do Jogador
+            const player = new Player();
+            const startX = player.x;
+            player.move('right');
+            assert(player.x === startX + player.speed, "3. Jogador deve se mover corretamente para a direita");
+
+            // Teste 4: Inimigos e Recompensas de Moedas
+            const enemy = new Enemy('basic');
+            const isDead = enemy.takeDamage(40);
+            assert(isDead && enemy.hp <= 0, "4. Inimigo básico deve ser derrotado ao receber 40 de dano");
+
+            // Teste 5: Inimigo Boss
+            const boss = new Enemy('boss');
+            assert(boss.hp === 300 && boss.damage === 30, "5. Boss deve ter 300 HP e causar 30 de dano");
+
+            // Teste 6: Compra de Torre V1
+            const tower = new TowerSlot(100, 100);
+            let coins = 50;
+            let cost = tower.getCost();
+            let spent = tower.upgrade(coins);
+            coins -= spent;
+            assert(tower.level === 1 && coins === 20, "6. Torre deve ser comprada (Nível 1) e descontar 30 moedas");
+
+            // Teste 7: Upgrades Sucessivos da Torre até o Nível Max (V5)
+            coins = 1000; // Moedas suficientes
+            while (tower.level < 5) {
+                let c = tower.upgrade(coins);
+                coins -= c;
+            }
+            assert(tower.level === 5, "7. Torre deve alcançar o nível máximo (V5)");
+
+            // Teste 8: Bloqueio de Upgrade além do Nível 5
+            let extraSpent = tower.upgrade(coins);
+            assert(tower.level === 5 && extraSpent === 0, "8. Torre não deve permitir upgrade além do V5");
+
+            // Teste 9: Atributos Escalados da Torre V5
+            const statsV5 = tower.getStats();
+            assert(statsV5.damage === 70 && statsV5.range === 175, "9. Dano da torre V5 deve ser 70 e alcance 175");
+
+            // Teste 10: Condição de Derrota
+            base.hp = 10;
+            base.hp -= boss.damage;
+            const isGameOver = base.hp <= 0;
+            assert(isGameOver === true, "10. O jogo deve registrar derrota quando o HP da base chegar a <= 0");
+
+            // Atualiza o painel geral
+            document.getElementById('total-tests').innerText = total;
+            document.getElementById('passed-tests').innerText = passed;
+            document.getElementById('failed-tests').innerText = failed;
+        }
+
+        // Executa automaticamente ao carregar a página
+        window.onload = runTestSuite;
+    </script>
+</body>
+</html>
